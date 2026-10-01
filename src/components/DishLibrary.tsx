@@ -1,135 +1,112 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { Dish } from "@/domain/types";
-import { DishRepository } from "@/data/repository";
-import { createSupabaseDishRepo } from "@/data/supabaseRepo";
-import { useSupabase } from "@/hooks/useSupabase";
-import { DishForm } from "./DishForm";
+import { useMemo, useState } from "react";
+import {
+  Dish,
+  DishTag,
+  DISH_TAG_LABELS,
+  DISH_TAGS,
+} from "@/domain/types";
+import { SearchIcon } from "./icons";
 
-type Props = { householdId: string };
+type Filter = "all" | DishTag;
 
-export function DishLibrary({ householdId }: Props) {
-  const supabase = useSupabase();
-  const repo: DishRepository = useMemo(
-    () => createSupabaseDishRepo(supabase, householdId),
-    [supabase, householdId]
-  );
+type Props = {
+  dishes: Dish[];
+  onAdd: () => void;
+  onEdit: (dish: Dish) => void;
+};
 
-  const [dishes, setDishes] = useState<Dish[]>([]);
-  const [editing, setEditing] = useState<Dish | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const FILTERS: { id: Filter; label: string }[] = [
+  { id: "all", label: "All" },
+  ...DISH_TAGS.filter((t) => t !== "snack").map((id) => ({
+    id,
+    label: DISH_TAG_LABELS[id],
+  })),
+];
 
-  const refresh = useCallback(async () => {
-    try {
-      setError(null);
-      const all = await repo.getAll();
-      setDishes(all);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load dishes");
-    } finally {
-      setLoading(false);
-    }
-  }, [repo]);
+export function DishLibrary({ dishes, onAdd, onEdit }: Props) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const handleSave = async (dish: Dish) => {
-    await repo.save(dish);
-    await refresh();
-    setShowForm(false);
-    setEditing(null);
-  };
-
-  const handleDelete = async (id: string, name: string) => {
-    if (!window.confirm(`Delete "${name}"? This will also remove it from your weekly plan.`)) return;
-    await repo.remove(id);
-    await refresh();
-  };
-
-  const openEdit = (dish: Dish) => {
-    setEditing(dish);
-    setShowForm(true);
-  };
-
-  const openNew = () => {
-    setEditing(null);
-    setShowForm(true);
-  };
-
-  const closeForm = () => {
-    setShowForm(false);
-    setEditing(null);
-  };
-
-  if (loading) return <div className="loading-state">Loading dishes...</div>;
-  if (error) return <div className="error-state">{error}</div>;
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return dishes.filter((dish) => {
+      const matchesFilter =
+        filter === "all" || dish.mealTypes.includes(filter);
+      const matchesQuery =
+        !q ||
+        dish.name.toLowerCase().includes(q) ||
+        dish.mealTypes.some((t) => DISH_TAG_LABELS[t].toLowerCase().includes(q));
+      return matchesFilter && matchesQuery;
+    });
+  }, [dishes, filter, query]);
 
   return (
-    <div>
-      <div className="dish-library-header">
-        <h2>Your Dishes</h2>
-        <button className="btn btn-primary" onClick={openNew}>
-          + New Dish
-        </button>
-      </div>
-
-      {dishes.length === 0 ? (
-        <div className="empty-state">
-          <p>No dishes yet. Add your first dish to get started.</p>
-          <button className="btn btn-primary" onClick={openNew}>
-            + New Dish
-          </button>
+    <div className="dishes-view">
+      <header className="page-header">
+        <div>
+          <h1>Dishes</h1>
+          <p className="page-sub">
+            {dishes.length} {dishes.length === 1 ? "dish" : "dishes"} · meal tags
+          </p>
         </div>
-      ) : (
-        <div className="dish-grid">
-          {dishes.map((dish) => (
-            <div key={dish.id} className="card dish-card">
-              <div className="dish-card-header">
-                <h3>{dish.name}</h3>
-                <div className="dish-card-actions">
-                  <button
-                    className="btn-ghost"
-                    onClick={() => openEdit(dish)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="btn-danger"
-                    onClick={() => handleDelete(dish.id, dish.name)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-              <div className="dish-card-chips">
-                {dish.mealTypes.map((mt) => (
-                  <span key={mt} className="chip">
-                    {mt.charAt(0).toUpperCase() + mt.slice(1)}
-                  </span>
-                ))}
-              </div>
-              {dish.ingredients.length > 0 && (
-                <div className="dish-card-ingredients">
-                  {dish.ingredients.map((i) => i.name).join(", ")}
-                </div>
-              )}
-            </div>
+        <button className="glass-chip-btn" onClick={onAdd}>
+          + Add
+        </button>
+      </header>
+
+      <div className="dishes-tools">
+        <label className="glass-search">
+          <SearchIcon />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search dishes"
+          />
+        </label>
+        <div className="filter-row">
+          {FILTERS.map((item) => (
+            <button
+              key={item.id}
+              className={`filter-chip ${filter === item.id ? "selected" : ""}`}
+              onClick={() => setFilter(item.id)}
+            >
+              {item.label}
+            </button>
           ))}
         </div>
-      )}
+      </div>
 
-      {showForm && (
-        <DishForm
-          initial={editing ?? undefined}
-          onSave={handleSave}
-          onCancel={closeForm}
-        />
-      )}
+      <div className="dish-list">
+        {visible.length === 0 ? (
+          <div className="empty-week">
+            <h2>No dishes yet</h2>
+            <p>Add your first dish to start planning the week.</p>
+            <button className="text-accent" onClick={onAdd}>
+              + Add dish
+            </button>
+          </div>
+        ) : (
+          visible.map((dish) => (
+            <button
+              key={dish.id}
+              className="dish-row"
+              onClick={() => onEdit(dish)}
+            >
+              <span className="dish-row-name">{dish.name}</span>
+              <span className="dish-row-tags">
+                {dish.mealTypes.map((tag) => (
+                  <span key={tag} className="matte-tag">
+                    {DISH_TAG_LABELS[tag]}
+                  </span>
+                ))}
+              </span>
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
 }

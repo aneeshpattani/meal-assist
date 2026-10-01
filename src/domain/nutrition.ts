@@ -1,4 +1,4 @@
-import { Dish, Nutrition, WeeklyPlan, DAYS, MEAL_TYPES } from "./types";
+import { DAYS, Dish, MEAL_TYPES, Nutrition, WeeklyPlan } from "./types";
 
 const NUTRITION_KEYS: (keyof Nutrition)[] = [
   "calories",
@@ -45,7 +45,10 @@ export function weeklyNutritionSummary(
   const all: Nutrition[] = [];
   for (const day of DAYS) {
     for (const meal of MEAL_TYPES) {
-      const ids = plan[day][meal] ?? [];
+      const ids = [
+        ...(plan[day][meal] ?? []),
+        ...(plan[day].snacks?.[meal] ?? []),
+      ];
       for (const id of ids) {
         const dish = dishLookup(id);
         if (dish?.nutritionSummary) {

@@ -1,167 +1,187 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import {
-  WeeklyPlan,
   DayOfWeek,
-  MealType,
   DAYS,
-  MEAL_TYPES,
+  DAY_LETTERS,
   Dish,
-  emptyWeeklyPlan,
+  MEAL_LABELS_UPPER,
+  MEAL_TYPES,
+  MealType,
+  WeeklyPlan,
 } from "@/domain/types";
-import { DishRepository, PlanRepository } from "@/data/repository";
-import { createSupabaseDishRepo, createSupabasePlanRepo } from "@/data/supabaseRepo";
-import { useSupabase } from "@/hooks/useSupabase";
+import {
+  filledSlotCount,
+  formatCollapsedDay,
+  formatWeekRange,
+  isMealFilled,
+  mealIds,
+  snackIds,
+  slotSummary,
+  weekHasMeals,
+} from "@/domain/plan";
+import { ChevronIcon, ShareIcon } from "./icons";
 
-type Props = { householdId: string };
-type PickerState = { day: DayOfWeek; meal: MealType } | null;
+type EditTarget = {
+  day: DayOfWeek;
+  meal: MealType;
+  dishId: string;
+  isSnack?: boolean;
+};
 
-export function WeeklyPlanner({ householdId }: Props) {
-  const supabase = useSupabase();
-  const dishRepo: DishRepository = useMemo(
-    () => createSupabaseDishRepo(supabase, householdId),
-    [supabase, householdId]
-  );
-  const planRepo: PlanRepository = useMemo(
-    () => createSupabasePlanRepo(supabase, householdId),
-    [supabase, householdId]
-  );
+type Props = {
+  plan: WeeklyPlan;
+  dishes: Dish[];
+  selectedDay: DayOfWeek;
+  monday: Date;
+  onSelectDay: (day: DayOfWeek) => void;
+  onAddDish: (meal: MealType) => void;
+  onAttachSnack: (meal: MealType) => void;
+  onEditDish: (target: EditTarget) => void;
+  onShare: () => void;
+};
 
-  const [plan, setPlan] = useState<WeeklyPlan>(emptyWeeklyPlan);
-  const [dishes, setDishes] = useState<Dish[]>([]);
-  const [picker, setPicker] = useState<PickerState>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
+function dishName(dishes: Dish[], id: string) {
+  return dishes.find((d) => d.id === id)?.name ?? id;
+}
 
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [loadedDishes, loadedPlan] = await Promise.all([
-        dishRepo.getAll(),
-        planRepo.get(),
-      ]);
-      setDishes(loadedDishes);
-      setPlan(loadedPlan);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load data");
-    } finally {
-      setLoading(false);
-    }
-  }, [dishRepo, planRepo]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setPicker(null);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const savePlan = async (updated: WeeklyPlan) => {
-    setPlan(updated);
-    await planRepo.save(updated);
-  };
-
-  const addDish = async (day: DayOfWeek, meal: MealType, dishId: string) => {
-    const updated = { ...plan };
-    const dayPlan = { ...updated[day] };
-    const current = dayPlan[meal] ?? [];
-    if (!current.includes(dishId)) {
-      dayPlan[meal] = [...current, dishId];
-    }
-    updated[day] = dayPlan;
-    await savePlan(updated);
-    setPicker(null);
-  };
-
-  const removeDish = async (day: DayOfWeek, meal: MealType, dishId: string) => {
-    const updated = { ...plan };
-    const dayPlan = { ...updated[day] };
-    dayPlan[meal] = (dayPlan[meal] ?? []).filter((id) => id !== dishId);
-    updated[day] = dayPlan;
-    await savePlan(updated);
-  };
-
-  const getDishName = (id: string): string => {
-    return dishes.find((d) => d.id === id)?.name ?? id;
-  };
-
-  const dayLabel = (d: DayOfWeek) =>
-    d.charAt(0).toUpperCase() + d.slice(1, 3);
-
-  if (loading) return <div className="loading-state">Loading planner...</div>;
-  if (error) return <div className="error-state">{error}</div>;
+export function WeeklyPlanner({
+  plan,
+  dishes,
+  selectedDay,
+  monday,
+  onSelectDay,
+  onAddDish,
+  onAttachSnack,
+  onEditDish,
+  onShare,
+}: Props) {
+  const dayPlan = plan[selectedDay];
+  const emptyWeek = !weekHasMeals(plan);
+  const otherDays = DAYS.filter((d) => d !== selectedDay);
 
   return (
-    <div>
-      <h2 style={{ marginBottom: 16 }}>Weekly Planner</h2>
-      {dishes.length === 0 ? (
-        <div className="empty-state">
-          <p>Add some dishes first, then come back to plan your week.</p>
+    <div className="plan-view">
+      <header className="page-header">
+        <div>
+          <h1>This week</h1>
+          <p className="page-sub">{formatWeekRange(monday)}</p>
         </div>
-      ) : (
-        <div className="planner-grid">
-          {DAYS.map((day) => (
-            <div key={day} className="planner-day">
-              <h4>{dayLabel(day)}</h4>
-              {MEAL_TYPES.map((meal) => {
-                const ids = plan[day][meal] ?? [];
-                const isPickerOpen =
-                  picker?.day === day && picker?.meal === meal;
-                const eligible = dishes.filter((d) => d.mealTypes.includes(meal));
-                return (
-                  <div key={meal} className="planner-meal-section">
-                    <div className="planner-meal-label">{meal}</div>
-                    {ids.map((id) => (
-                      <div key={id} className="planner-dish-tag">
-                        <span>{getDishName(id)}</span>
-                        <button onClick={() => removeDish(day, meal, id)}>
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <div className="dish-picker" ref={isPickerOpen ? pickerRef : undefined}>
-                      <button
-                        className="planner-add-btn"
-                        onClick={() =>
-                          setPicker(isPickerOpen ? null : { day, meal })
-                        }
-                      >
-                        + Add
-                      </button>
-                      {isPickerOpen && (
-                        <div className="dish-picker-dropdown">
-                          {eligible.length === 0 ? (
-                            <div className="dish-picker-item">No dishes for {meal}</div>
-                          ) : (
-                            eligible.map((d) => (
-                              <button
-                                key={d.id}
-                                className="dish-picker-item"
-                                onClick={() => addDish(day, meal, d.id)}
-                              >
-                                {d.name}
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+        <button className="glass-chip-btn" onClick={onShare}>
+          <ShareIcon />
+          Share
+        </button>
+      </header>
+
+      <div className="day-stepper-wrap">
+        <div className="day-stepper" role="tablist" aria-label="Days">
+          {DAYS.map((day) => {
+            const filled = MEAL_TYPES.map((meal) => isMealFilled(plan[day], meal));
+            const selected = day === selectedDay;
+            return (
+              <button
+                key={day}
+                role="tab"
+                aria-selected={selected}
+                className={`day-pill ${selected ? "selected" : ""}`}
+                onClick={() => onSelectDay(day)}
+              >
+                <span>{DAY_LETTERS[day]}</span>
+                <span className="day-dots" aria-hidden>
+                  {filled.map((on, i) => (
+                    <i key={i} className={on ? "on" : ""} />
+                  ))}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="plan-scroll">
+        {emptyWeek && (
+          <div className="empty-week">
+            <h2>No meals yet this week</h2>
+            <p>Plan Monday first — add a dish to Breakfast.</p>
+          </div>
+        )}
+
+        {MEAL_TYPES.map((meal) => {
+          const mains = mealIds(dayPlan, meal);
+          const snacks = snackIds(dayPlan, meal);
+          const hasDishes = mains.length > 0;
+          return (
+            <section key={meal} className="meal-card">
+              <p className="meal-label">{MEAL_LABELS_UPPER[meal]}</p>
+              {mains.map((id) => (
+                <button
+                  key={id}
+                  className="meal-dish"
+                  onClick={() =>
+                    onEditDish({ day: selectedDay, meal, dishId: id })
+                  }
+                >
+                  {dishName(dishes, id)}
+                </button>
+              ))}
+              {snacks.map((id) => (
+                <button
+                  key={`snack-${id}`}
+                  className="meal-snack"
+                  onClick={() =>
+                    onEditDish({
+                      day: selectedDay,
+                      meal,
+                      dishId: id,
+                      isSnack: true,
+                    })
+                  }
+                >
+                  Snack · {dishName(dishes, id)}
+                </button>
+              ))}
+              {hasDishes ? (
+                <div className="meal-actions">
+                  <button className="text-accent" onClick={() => onAddDish(meal)}>
+                    + Add dish
+                  </button>
+                  {snacks.length === 0 && (
+                    <button
+                      className="text-quiet"
+                      onClick={() => onAttachSnack(meal)}
+                    >
+                      Attach snack
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <button
+                  className="text-accent add-empty"
+                  onClick={() => onAddDish(meal)}
+                >
+                  + Add dish
+                </button>
+              )}
+            </section>
+          );
+        })}
+
+        <div className="other-days">
+          {otherDays.map((day) => (
+            <button
+              key={day}
+              className="collapsed-day"
+              onClick={() => onSelectDay(day)}
+            >
+              <span className="collapsed-left">
+                <ChevronIcon />
+                {formatCollapsedDay(monday, day)}
+              </span>
+              <span>{slotSummary(filledSlotCount(plan[day]))}</span>
+            </button>
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
