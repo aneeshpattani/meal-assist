@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import { useSupabase } from "@/hooks/useSupabase";
-import { useHousehold } from "@/hooks/useHousehold";
+import { HouseholdProvider, useHousehold } from "@/hooks/useHousehold";
 import { useRouter } from "next/navigation";
 
 function generateInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const supabase = useSupabase();
   const { user } = useHousehold();
   const router = useRouter();
@@ -183,5 +183,13 @@ export default function OnboardingPage() {
         <button className="btn-ghost" onClick={() => setMode("choose")}>Back</button>
       </div>
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <HouseholdProvider>
+      <OnboardingContent />
+    </HouseholdProvider>
   );
 }

@@ -1,5 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Dish, Ingredient, MealType, WeeklyPlan, emptyWeeklyPlan } from "@/domain/types";
+import { Dish, DishTag, Ingredient, WeeklyPlan } from "@/domain/types";
+import { normalizePlan } from "@/domain/plan";
 import { DishRepository, PlanRepository } from "@/data/repository";
 
 type DishRow = {
@@ -16,7 +17,7 @@ function rowToDish(row: DishRow): Dish {
   return {
     id: row.id,
     name: row.name,
-    mealTypes: row.meal_types as MealType[],
+    mealTypes: row.meal_types as DishTag[],
     ingredients: row.ingredients,
     lastCooked: row.last_cooked ?? undefined,
     nutritionSummary: row.nutrition_summary ?? undefined,
@@ -84,7 +85,7 @@ export function createSupabasePlanRepo(
         .eq("household_id", householdId)
         .maybeSingle();
       if (error) throw error;
-      return data?.plan ?? emptyWeeklyPlan();
+      return normalizePlan(data?.plan);
     },
 
     async save(plan: WeeklyPlan): Promise<void> {
