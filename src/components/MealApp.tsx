@@ -52,6 +52,7 @@ type Props = {
   inviteCode?: string | null;
   onSignOut?: () => void;
   initialTab?: AppTab;
+  initialDay?: DayOfWeek;
   initialSheet?:
     | "picker"
     | "snack"
@@ -71,6 +72,7 @@ export function MealApp({
   inviteCode,
   onSignOut,
   initialTab = "plan",
+  initialDay,
   initialSheet = null,
   hideTabBar,
 }: Props) {
@@ -79,7 +81,9 @@ export function MealApp({
   const [tab, setTab] = useState<AppTab>(initialTab);
   const [plan, setPlan] = useState<WeeklyPlan>(emptyWeeklyPlan);
   const [dishes, setDishes] = useState<Dish[]>([]);
-  const [selectedDay, setSelectedDay] = useState<DayOfWeek>(todayDayOfWeek);
+  const [selectedDay, setSelectedDay] = useState<DayOfWeek>(
+    initialDay ?? todayDayOfWeek()
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [picker, setPicker] = useState<PickerState | null>(null);
@@ -120,12 +124,12 @@ export function MealApp({
     if (initialSheet === "cook") setCookOpen(true);
     if (initialSheet === "edit") {
       setEdit({
-        day: todayDayOfWeek(),
+        day: initialDay ?? todayDayOfWeek(),
         meal: "breakfast",
         dishId: "idli",
       });
     }
-  }, [initialSheet]);
+  }, [initialSheet, initialDay]);
 
   const savePlan = async (next: WeeklyPlan) => {
     setPlan(next);

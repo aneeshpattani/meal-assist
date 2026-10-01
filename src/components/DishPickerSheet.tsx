@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dish,
   DISH_TAG_LABELS,
@@ -48,6 +48,14 @@ export function DishPickerSheet({
     const tag = mode === "snack" ? "snack" : meal;
     return dishes.filter((d) => d.mealTypes.includes(tag));
   }, [dishes, meal, mode]);
+
+  useEffect(() => {
+    if (selectedId) {
+      setPicked(selectedId);
+      return;
+    }
+    if (eligible[0]) setPicked(eligible[0].id);
+  }, [selectedId, eligible]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

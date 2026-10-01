@@ -39,6 +39,7 @@ function PreviewInner() {
       listScope="preview"
       inviteCode="HOME12"
       initialTab={tab === "more" ? "plan" : tab}
+      initialDay="monday"
       initialSheet={sheet}
     />
   );
