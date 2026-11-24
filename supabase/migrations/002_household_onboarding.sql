@@ -22,6 +22,38 @@ as $$
   where user_id = auth.uid();
 $$;
 
+revoke all on function public.user_household_ids() from public;
+revoke all on function public.user_household_ids() from anon;
+revoke all on function public.user_household_ids() from authenticated;
+grant execute on function public.user_household_ids() to authenticated;
+
+-- Phase 1: one household per user. Backstops concurrent create/join races.
+create unique index if not exists household_members_user_id_uidx
+  on public.household_members (user_id);
+
+alter table public.households
+  drop constraint if exists households_name_length;
+alter table public.households
+  add constraint households_name_length
+  check (char_length(name) between 1 and 80);
+
+-- 8-character unambiguous invite codes for new households. Skipped when
+-- legacy rows (e.g. 6-char hex from an earlier 002 draft) are present.
+do $$
+begin
+  if not exists (
+    select 1
+    from public.households
+    where invite_code !~ '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$'
+  ) then
+    alter table public.households
+      drop constraint if exists households_invite_code_format;
+    alter table public.households
+      add constraint households_invite_code_format
+      check (invite_code ~ '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$');
+  end if;
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- Starter catalog (108 household dishes from cleaned-dishes-v4.csv)
 -- Not readable via the Data API: RLS is on with no policies for anon/authenticated.
@@ -35,6 +67,9 @@ create table if not exists public.starter_dishes (
 );
 
 alter table public.starter_dishes enable row level security;
+alter table public.starter_dishes force row level security;
+revoke all on table public.starter_dishes from public;
+revoke all on table public.starter_dishes from anon, authenticated;
 
 insert into public.starter_dishes (id, name, meal_types, notes, ingredients)
 select
@@ -3479,12 +3514,15 @@ set
   ingredients = excluded.ingredients;
 
 -- Copy the catalog into a household. Idempotent: existing dish rows are kept.
+-- Called only from create_household so a raw households INSERT does not seed.
 create or replace function public.seed_household_starter_dishes(p_household_id uuid)
-returns void
+returns integer
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_inserted integer := 0;
 begin
   insert into public.dishes (id, household_id, name, meal_types, notes, ingredients)
   select
@@ -3496,37 +3534,51 @@ begin
     s.ingredients
   from public.starter_dishes s
   on conflict (household_id, id) do nothing;
+  get diagnostics v_inserted = row_count;
+  return v_inserted;
 end;
 $$;
 
 revoke all on function public.seed_household_starter_dishes(uuid) from public;
-revoke all on function public.seed_household_starter_dishes(uuid) from anon, authenticated;
+revoke all on function public.seed_household_starter_dishes(uuid) from anon;
+revoke all on function public.seed_household_starter_dishes(uuid) from authenticated;
 
--- Seed dishes + empty weekly plan for every new household (RPC or otherwise).
-create or replace function public.handle_new_household()
-returns trigger
+-- Earlier drafts seeded from an AFTER INSERT trigger. Drop it if present so
+-- re-applying 002 does not leave a hidden side-effect.
+drop trigger if exists on_household_created on public.households;
+drop function if exists public.handle_new_household();
+
+-- 8 unambiguous uppercase chars (no 0/O/1/I). 32-char alphabet, 8 bytes,
+-- 256 is divisible by 32 so modulo is unbiased.
+create or replace function public.generate_invite_code()
+returns text
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  alphabet constant text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  raw bytea := pg_catalog.decode(
+    pg_catalog.replace(pg_catalog.gen_random_uuid()::text, '-', ''),
+    'hex'
+  );
+  result text := '';
+  i int;
 begin
-  insert into public.weekly_plans (household_id, plan)
-  values (new.id, '{}'::jsonb)
-  on conflict (household_id) do nothing;
-
-  perform public.seed_household_starter_dishes(new.id);
-  return new;
+  for i in 0..7 loop
+    result := result || pg_catalog.substr(
+      alphabet,
+      (pg_catalog.get_byte(raw, i) % 32) + 1,
+      1
+    );
+  end loop;
+  return result;
 end;
 $$;
 
-revoke all on function public.handle_new_household() from public;
-revoke all on function public.handle_new_household() from anon, authenticated;
-
-drop trigger if exists on_household_created on public.households;
-create trigger on_household_created
-  after insert on public.households
-  for each row
-  execute function public.handle_new_household();
+revoke all on function public.generate_invite_code() from public;
+revoke all on function public.generate_invite_code() from anon;
+revoke all on function public.generate_invite_code() from authenticated;
 
 -- ---------------------------------------------------------------------------
 -- RLS-safe household create / join
@@ -3536,6 +3588,14 @@ create trigger on_household_created
 --     member yet, so RETURNING/SELECT is filtered)
 --   * looking up a household by invite_code to join also fails
 -- SECURITY DEFINER RPCs run as the owner (bypass RLS) after auth.uid() checks.
+--
+-- Error SQLSTATE contract (also used as the exception message token):
+--   28000 not_authenticated
+--   P2201 invalid_invite
+--   P2202 already_member
+--   P2203 invalid_name
+--   P2204 invite_unavailable
+--   P2205 seed_failed
 -- ---------------------------------------------------------------------------
 create or replace function public.create_household(p_name text)
 returns jsonb
@@ -3551,34 +3611,38 @@ declare
   v_existing_id uuid;
   v_existing_code text;
   v_attempts int := 0;
+  v_seeded integer := 0;
+  v_catalog integer := 0;
 begin
   if v_user_id is null then
-    raise exception 'Not authenticated' using errcode = '28000';
+    raise exception 'not_authenticated' using errcode = '28000';
   end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_user_id::text, 0)
+  );
 
   select hm.household_id, h.invite_code
     into v_existing_id, v_existing_code
   from public.household_members hm
   join public.households h on h.id = hm.household_id
-  where hm.user_id = v_user_id
-  order by h.created_at asc
-  limit 1;
+  where hm.user_id = v_user_id;
 
   if v_existing_id is not null then
-    return jsonb_build_object(
+    return pg_catalog.jsonb_build_object(
       'id', v_existing_id,
       'invite_code', v_existing_code
     );
   end if;
 
-  v_name := nullif(btrim(coalesce(p_name, '')), '');
-  if v_name is null then
-    v_name := 'Home';
+  v_name := pg_catalog.btrim(coalesce(p_name, ''));
+  if v_name = '' or pg_catalog.char_length(v_name) > 80 then
+    raise exception 'invalid_name' using errcode = 'P2203';
   end if;
 
   loop
     v_attempts := v_attempts + 1;
-    v_invite := upper(substr(replace(pg_catalog.gen_random_uuid()::text, '-', ''), 1, 6));
+    v_invite := public.generate_invite_code();
     begin
       insert into public.households (name, invite_code)
       values (v_name, v_invite)
@@ -3587,7 +3651,7 @@ begin
     exception
       when unique_violation then
         if v_attempts >= 8 then
-          raise exception 'Could not allocate an invite code' using errcode = 'P0001';
+          raise exception 'invite_unavailable' using errcode = 'P2204';
         end if;
     end;
   end loop;
@@ -3595,7 +3659,17 @@ begin
   insert into public.household_members (household_id, user_id)
   values (v_household_id, v_user_id);
 
-  return jsonb_build_object(
+  insert into public.weekly_plans (household_id, plan)
+  values (v_household_id, '{}'::jsonb)
+  on conflict (household_id) do nothing;
+
+  v_seeded := public.seed_household_starter_dishes(v_household_id);
+  select count(*)::integer into v_catalog from public.starter_dishes;
+  if v_catalog = 0 or v_seeded <> v_catalog then
+    raise exception 'seed_failed' using errcode = 'P2205';
+  end if;
+
+  return pg_catalog.jsonb_build_object(
     'id', v_household_id,
     'invite_code', v_invite
   );
@@ -3616,12 +3690,16 @@ declare
   v_existing_id uuid;
 begin
   if v_user_id is null then
-    raise exception 'Not authenticated' using errcode = '28000';
+    raise exception 'not_authenticated' using errcode = '28000';
   end if;
 
-  v_code := upper(btrim(coalesce(p_invite_code, '')));
-  if v_code = '' then
-    raise exception 'Invalid invite code' using errcode = 'P0001';
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_user_id::text, 0)
+  );
+
+  v_code := pg_catalog.upper(pg_catalog.btrim(coalesce(p_invite_code, '')));
+  if v_code !~ '^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$' then
+    raise exception 'invalid_invite' using errcode = 'P2201';
   end if;
 
   select h.id, h.invite_code
@@ -3630,25 +3708,23 @@ begin
   where h.invite_code = v_code;
 
   if v_household_id is null then
-    raise exception 'Invalid invite code' using errcode = 'P0001';
+    raise exception 'invalid_invite' using errcode = 'P2201';
   end if;
 
   select hm.household_id
     into v_existing_id
   from public.household_members hm
-  where hm.user_id = v_user_id
-  order by hm.household_id
-  limit 1;
+  where hm.user_id = v_user_id;
 
   if v_existing_id is not null and v_existing_id <> v_household_id then
-    raise exception 'Already a member of a household' using errcode = 'P0001';
+    raise exception 'already_member' using errcode = 'P2202';
   end if;
 
   insert into public.household_members (household_id, user_id)
   values (v_household_id, v_user_id)
-  on conflict (household_id, user_id) do nothing;
+  on conflict (user_id) do nothing;
 
-  return jsonb_build_object(
+  return pg_catalog.jsonb_build_object(
     'id', v_household_id,
     'invite_code', v_invite
   );
@@ -3657,8 +3733,10 @@ $$;
 
 revoke all on function public.create_household(text) from public;
 revoke all on function public.create_household(text) from anon;
+revoke all on function public.create_household(text) from authenticated;
 grant execute on function public.create_household(text) to authenticated;
 
 revoke all on function public.join_household(text) from public;
 revoke all on function public.join_household(text) from anon;
+revoke all on function public.join_household(text) from authenticated;
 grant execute on function public.join_household(text) to authenticated;
