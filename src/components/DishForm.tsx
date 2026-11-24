@@ -58,6 +58,7 @@ export function DishForm({ initial, onSave, onCancel }: Props) {
       ingredients,
       lastCooked: initial?.lastCooked,
       nutritionSummary: initial?.nutritionSummary,
+      notes: initial?.notes,
     });
   };
 

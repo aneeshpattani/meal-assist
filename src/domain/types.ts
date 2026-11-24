@@ -32,6 +32,7 @@ export type Dish = {
   ingredients: Ingredient[];
   lastCooked?: string;
   nutritionSummary?: Nutrition;
+  notes?: string;
 };
 
 export type DayOfWeek =
