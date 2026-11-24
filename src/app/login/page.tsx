@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useSupabase } from "@/hooks/useSupabase";
+import { hasSupabaseConfig } from "@/lib/supabase/client";
+import { MISSING_SUPABASE_CONFIG_MESSAGE } from "@/data/household";
 
 export default function LoginPage() {
   const supabase = useSupabase();
@@ -13,18 +15,26 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!hasSupabaseConfig()) {
+      setError(MISSING_SUPABASE_CONFIG_MESSAGE);
+      return;
+    }
+
     setLoading(true);
+    try {
+      const { error: authError } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      });
 
-    const { error: authError } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-    });
-
-    setLoading(false);
-    if (authError) {
-      setError(authError.message);
-    } else {
-      setSent(true);
+      if (authError) {
+        setError(authError.message);
+      } else {
+        setSent(true);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 

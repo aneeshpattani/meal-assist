@@ -2,17 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { useSupabase } from "@/hooks/useSupabase";
-import { HouseholdProvider, useHousehold } from "@/hooks/useHousehold";
+import { useHousehold } from "@/hooks/useHousehold";
 import { useRouter } from "next/navigation";
 import {
+  HOUSEHOLD_NAME_MAX_LENGTH,
+  INVITE_CODE_LENGTH,
+  MISSING_SUPABASE_CONFIG_MESSAGE,
   createHousehold,
-  householdRpcMessage,
+  householdErrorFromUnknown,
   joinHousehold,
+  validateHouseholdName,
+  validateInviteCode,
 } from "@/data/household";
+import { hasSupabaseConfig } from "@/lib/supabase/client";
 
 function OnboardingContent() {
   const supabase = useSupabase();
-  const { user, householdId, loading: householdLoading } = useHousehold();
+  const { user, householdId, loading: householdLoading, error: householdError, refresh } =
+    useHousehold();
   const router = useRouter();
   const [mode, setMode] = useState<"choose" | "create" | "join">("choose");
   const [householdName, setHouseholdName] = useState("Home");
@@ -22,6 +29,7 @@ function OnboardingContent() {
 
   useEffect(() => {
     if (householdLoading) return;
+    if (householdError) return;
     if (!user) {
       router.replace("/login");
       return;
@@ -29,23 +37,31 @@ function OnboardingContent() {
     if (householdId) {
       router.replace("/");
     }
-  }, [householdLoading, user, householdId, router]);
+  }, [householdLoading, householdError, user, householdId, router]);
 
   const handleCreate = async () => {
     if (!user) return;
     setError("");
-    setLoading(true);
 
+    if (!hasSupabaseConfig()) {
+      setError(MISSING_SUPABASE_CONFIG_MESSAGE);
+      return;
+    }
+
+    const nameError = validateHouseholdName(householdName);
+    if (nameError) {
+      setError(nameError.message);
+      return;
+    }
+
+    setLoading(true);
     try {
       await createHousehold(supabase, householdName);
-      router.push("/");
+      await refresh();
+      router.replace("/");
     } catch (e: unknown) {
-      setError(
-        householdRpcMessage(
-          e && typeof e === "object" ? (e as { message?: string }) : null,
-          "Could not create household."
-        )
-      );
+      setError(householdErrorFromUnknown(e).message);
+    } finally {
       setLoading(false);
     }
   };
@@ -53,23 +69,55 @@ function OnboardingContent() {
   const handleJoin = async () => {
     if (!user) return;
     setError("");
-    setLoading(true);
 
+    if (!hasSupabaseConfig()) {
+      setError(MISSING_SUPABASE_CONFIG_MESSAGE);
+      return;
+    }
+
+    const codeError = validateInviteCode(inviteInput);
+    if (codeError) {
+      setError(codeError.message);
+      return;
+    }
+
+    setLoading(true);
     try {
       await joinHousehold(supabase, inviteInput);
-      router.push("/");
+      await refresh();
+      router.replace("/");
     } catch (e: unknown) {
-      setError(
-        householdRpcMessage(
-          e && typeof e === "object" ? (e as { message?: string }) : null,
-          "Invalid invite code. Please check and try again."
-        )
-      );
+      setError(householdErrorFromUnknown(e, "invalid_invite").message);
+    } finally {
       setLoading(false);
     }
   };
 
-  if (householdLoading || !user || householdId) {
+  if (householdLoading) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <p>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (householdError) {
+    return (
+      <div className="auth-page">
+        <div className="auth-card">
+          <h1>Could not load household</h1>
+          <p className="auth-error">{householdError}</p>
+          <button className="btn btn-primary" onClick={() => void refresh()}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || householdId) {
     return (
       <div className="auth-page">
         <div className="auth-card">
@@ -110,6 +158,7 @@ function OnboardingContent() {
               value={householdName}
               onChange={(e) => setHouseholdName(e.target.value)}
               placeholder="e.g. Home"
+              maxLength={HOUSEHOLD_NAME_MAX_LENGTH}
             />
           </div>
           <button className="btn btn-primary" onClick={handleCreate} disabled={loading}>
@@ -132,8 +181,12 @@ function OnboardingContent() {
             type="text"
             value={inviteInput}
             onChange={(e) => setInviteInput(e.target.value)}
-            placeholder="e.g. ABC123"
+            placeholder="e.g. ABCD2345"
             autoFocus
+            maxLength={INVITE_CODE_LENGTH + 8}
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
           />
         </div>
         <button className="btn btn-primary" onClick={handleJoin} disabled={loading}>
@@ -147,9 +200,5 @@ function OnboardingContent() {
 }
 
 export default function OnboardingPage() {
-  return (
-    <HouseholdProvider>
-      <OnboardingContent />
-    </HouseholdProvider>
-  );
+  return <OnboardingContent />;
 }

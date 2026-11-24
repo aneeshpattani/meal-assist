@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Dish, Ingredient, MealType, MEAL_TYPES } from "@/domain/types";
+import { Dish, Ingredient, MealType, MEAL_TYPES, normalizeDishNotes } from "@/domain/types";
 
 type Props = {
   initial?: Dish;
@@ -58,7 +58,7 @@ export function DishForm({ initial, onSave, onCancel }: Props) {
       ingredients,
       lastCooked: initial?.lastCooked,
       nutritionSummary: initial?.nutritionSummary,
-      notes: initial?.notes,
+      notes: normalizeDishNotes(initial?.notes) ?? undefined,
     });
   };
 

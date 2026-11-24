@@ -1,5 +1,12 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Dish, Ingredient, MealType, WeeklyPlan, emptyWeeklyPlan } from "@/domain/types";
+import {
+  Dish,
+  Ingredient,
+  MealType,
+  WeeklyPlan,
+  emptyWeeklyPlan,
+  normalizeDishNotes,
+} from "@/domain/types";
 import { DishRepository, PlanRepository } from "@/data/repository";
 
 type DishRow = {
@@ -59,7 +66,7 @@ export function createSupabaseDishRepo(
         ingredients: dish.ingredients,
         last_cooked: dish.lastCooked ?? null,
         nutrition_summary: dish.nutritionSummary ?? null,
-        notes: dish.notes?.trim() ? dish.notes.trim() : null,
+        notes: normalizeDishNotes(dish.notes),
       });
       if (error) throw error;
     },

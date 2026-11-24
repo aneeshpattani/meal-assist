@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { DishLibrary } from "@/components/DishLibrary";
 import { WeeklyPlanner } from "@/components/WeeklyPlanner";
-import { HouseholdProvider, useHousehold } from "@/hooks/useHousehold";
+import { useHousehold } from "@/hooks/useHousehold";
 import { useRouter } from "next/navigation";
 import { useSupabase } from "@/hooks/useSupabase";
 
 type Tab = "dishes" | "planner";
 
 function AppContent() {
-  const { user, householdId, inviteCode, loading } = useHousehold();
+  const { user, householdId, inviteCode, loading, error, refresh } = useHousehold();
   const router = useRouter();
   const supabase = useSupabase();
   const [tab, setTab] = useState<Tab>("dishes");
@@ -23,13 +23,26 @@ function AppContent() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="app">
+        <div className="error-state">
+          <p>{error}</p>
+          <button className="btn btn-secondary" onClick={() => void refresh()}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!user) {
-    router.push("/login");
+    router.replace("/login");
     return null;
   }
 
   if (!householdId) {
-    router.push("/onboarding");
+    router.replace("/onboarding");
     return null;
   }
 
@@ -75,9 +88,5 @@ function AppContent() {
 }
 
 export default function Home() {
-  return (
-    <HouseholdProvider>
-      <AppContent />
-    </HouseholdProvider>
-  );
+  return <AppContent />;
 }
