@@ -49,6 +49,8 @@ Data flows through a `DishRepository` / `PlanRepository` interface backed by Sup
    - `supabase/migrations/002_household_onboarding.sql` (notes column, create/join RPCs, 108-dish starter catalog)
 4. Copy Project URL and anon key from Settings → API into your env vars.
 
+The 108-dish catalog in `002` is generated from `supabase/seed/cleaned-dishes-v4.csv`. After editing the CSV, run `node scripts/generate-starter-catalog.mjs` and `npm test` (which fails if they drift).
+
 ## Environment variables
 
 | Variable | Description |

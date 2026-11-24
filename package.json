@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/verify-starter-catalog.mjs && node scripts/test-onboarding-sql.mjs"
+    "test": "node scripts/generate-starter-catalog.mjs --check && node scripts/verify-starter-catalog.mjs && node scripts/test-onboarding-sql.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
