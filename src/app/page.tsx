@@ -1,34 +1,36 @@
 "use client";
 
-import { useState } from "react";
-import { DishLibrary } from "@/components/DishLibrary";
-import { WeeklyPlanner } from "@/components/WeeklyPlanner";
-import { useHousehold } from "@/hooks/useHousehold";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { useHousehold } from "@/hooks/useHousehold";
 import { useSupabase } from "@/hooks/useSupabase";
-
-type Tab = "dishes" | "planner";
+import { createSupabaseDishRepo, createSupabasePlanRepo } from "@/data/supabaseRepo";
+import { MealApp } from "@/components/MealApp";
 
 function AppContent() {
   const { user, householdId, inviteCode, loading, error, refresh } = useHousehold();
   const router = useRouter();
   const supabase = useSupabase();
-  const [tab, setTab] = useState<Tab>("dishes");
+
+  const dishRepo = useMemo(
+    () => (householdId ? createSupabaseDishRepo(supabase, householdId) : null),
+    [supabase, householdId]
+  );
+  const planRepo = useMemo(
+    () => (householdId ? createSupabasePlanRepo(supabase, householdId) : null),
+    [supabase, householdId]
+  );
 
   if (loading) {
-    return (
-      <div className="app">
-        <div className="loading-state">Loading...</div>
-      </div>
-    );
+    return <div className="loading-state">Loading…</div>;
   }
 
   if (error) {
     return (
-      <div className="app">
-        <div className="error-state">
-          <p>{error}</p>
-          <button className="btn btn-secondary" onClick={() => void refresh()}>
+      <div className="auth-page">
+        <div className="auth-card">
+          <p className="auth-error">{error}</p>
+          <button className="btn btn-primary" onClick={() => void refresh()}>
             Retry
           </button>
         </div>
@@ -41,49 +43,22 @@ function AppContent() {
     return null;
   }
 
-  if (!householdId) {
+  if (!householdId || !dishRepo || !planRepo) {
     router.replace("/onboarding");
     return null;
   }
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
-
   return (
-    <div className="app">
-      <header className="app-header">
-        <h1>Meal Assist</h1>
-        <nav className="tab-nav">
-          <button
-            className={`tab-btn ${tab === "dishes" ? "active" : ""}`}
-            onClick={() => setTab("dishes")}
-          >
-            Dish Library
-          </button>
-          <button
-            className={`tab-btn ${tab === "planner" ? "active" : ""}`}
-            onClick={() => setTab("planner")}
-          >
-            Weekly Planner
-          </button>
-        </nav>
-      </header>
-      <main className="app-main">
-        {tab === "dishes" ? (
-          <DishLibrary householdId={householdId} />
-        ) : (
-          <WeeklyPlanner householdId={householdId} />
-        )}
-      </main>
-      <footer className="app-footer">
-        {inviteCode && (
-          <span className="invite-code">Invite code: <strong>{inviteCode}</strong></span>
-        )}
-        <button className="btn-ghost" onClick={handleSignOut}>Sign out</button>
-      </footer>
-    </div>
+    <MealApp
+      dishRepo={dishRepo}
+      planRepo={planRepo}
+      listScope={householdId}
+      inviteCode={inviteCode}
+      onSignOut={async () => {
+        await supabase.auth.signOut();
+        router.push("/login");
+      }}
+    />
   );
 }
 
