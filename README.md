@@ -44,8 +44,12 @@ Data flows through a `DishRepository` / `PlanRepository` interface backed by Sup
 
 1. Create a project at [supabase.com](https://supabase.com).
 2. Enable **Email** provider with **Magic Link** in Authentication settings.
-3. Run `supabase/migrations/001_initial_schema.sql` in the SQL Editor.
+3. Run the SQL migrations in order in the SQL Editor:
+   - `supabase/migrations/001_initial_schema.sql`
+   - `supabase/migrations/002_household_onboarding.sql` (notes column, create/join RPCs, 108-dish starter catalog)
 4. Copy Project URL and anon key from Settings → API into your env vars.
+
+The 108-dish catalog in `002` is generated from `supabase/seed/cleaned-dishes-v4.csv`. After editing the CSV, run `node scripts/generate-starter-catalog.mjs` and `npm test` (which fails if they drift).
 
 ## Environment variables
 

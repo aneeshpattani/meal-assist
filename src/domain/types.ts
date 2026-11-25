@@ -32,7 +32,14 @@ export type Dish = {
   ingredients: Ingredient[];
   lastCooked?: string;
   nutritionSummary?: Nutrition;
+  notes?: string;
 };
+
+/** Empty or whitespace-only notes persist as SQL NULL. */
+export function normalizeDishNotes(notes?: string | null): string | null {
+  const trimmed = notes?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 export type DayOfWeek =
   | "monday"
