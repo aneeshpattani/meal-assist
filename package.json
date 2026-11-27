@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/generate-starter-catalog.mjs --check && node scripts/verify-starter-catalog.mjs && node scripts/test-onboarding-sql.mjs && node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/test-dish-picker.mjs"
+    "test": "node scripts/generate-starter-catalog.mjs --check && node scripts/verify-starter-catalog.mjs && node scripts/test-onboarding-sql.mjs && node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/test-dish-picker.mjs && node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning scripts/test-household-session.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
