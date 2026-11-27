@@ -8,11 +8,13 @@ import {
   useState,
   ReactNode,
 } from "react";
+import { Session, User } from "@supabase/supabase-js";
 import { useSupabase } from "./useSupabase";
-import { User } from "@supabase/supabase-js";
+import { MISSING_SUPABASE_CONFIG_MESSAGE } from "@/data/household";
 import {
-  MISSING_SUPABASE_CONFIG_MESSAGE,
-} from "@/data/household";
+  SIGNED_OUT_HOUSEHOLD,
+  loadHouseholdForSession,
+} from "@/data/householdSession";
 import { hasSupabaseConfig } from "@/lib/supabase/client";
 
 const LOAD_TIMEOUT_MS = 15000;
@@ -45,105 +47,91 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     error: null,
   });
 
-  const load = useCallback(async () => {
-    if (!hasSupabaseConfig()) {
-      setState({
-        user: null,
-        householdId: null,
-        inviteCode: null,
-        loading: false,
-        error: MISSING_SUPABASE_CONFIG_MESSAGE,
-      });
-      return;
-    }
-
-    setState((prev) => ({ ...prev, loading: true, error: null }));
-
-    let timedOut = false;
-    const timer = window.setTimeout(() => {
-      timedOut = true;
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error:
-          "Couldn't load your household. Check your connection and try again.",
-      }));
-    }, LOAD_TIMEOUT_MS);
-
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (timedOut) return;
-
-      if (!user) {
+  const load = useCallback(
+    async (session?: Session | null) => {
+      if (!hasSupabaseConfig()) {
         setState({
           user: null,
           householdId: null,
           inviteCode: null,
           loading: false,
-          error: null,
+          error: MISSING_SUPABASE_CONFIG_MESSAGE,
         });
         return;
       }
 
-      const { data: membership, error: membershipError } = await supabase
-        .from("household_members")
-        .select("household_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (timedOut) return;
-      if (membershipError) throw membershipError;
+      if (session === null) {
+        setState({ ...SIGNED_OUT_HOUSEHOLD });
+        return;
+      }
 
-      if (!membership) {
+      setState((prev) => ({ ...prev, loading: true, error: null }));
+
+      let timedOut = false;
+      const timer = window.setTimeout(() => {
+        timedOut = true;
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error:
+            "Couldn't load your household. Check your connection and try again.",
+        }));
+      }, LOAD_TIMEOUT_MS);
+
+      try {
+        const result = await loadHouseholdForSession({
+          session,
+          getUser: () => supabase.auth.getUser(),
+          fetchHousehold: () =>
+            supabase.from("households").select("id, invite_code").maybeSingle(),
+        });
+        if (timedOut) return;
+
+        if (result.status === "signed-out") {
+          setState({ ...SIGNED_OUT_HOUSEHOLD });
+          return;
+        }
+        if (result.status === "error") {
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            error: result.message,
+          }));
+          return;
+        }
+
         setState({
-          user,
-          householdId: null,
-          inviteCode: null,
+          user: result.user,
+          householdId: result.householdId,
+          inviteCode: result.inviteCode,
           loading: false,
           error: null,
         });
-        return;
+      } catch (error) {
+        if (timedOut) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Couldn't load your household. Please try again.";
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error: message,
+        }));
+      } finally {
+        window.clearTimeout(timer);
       }
-
-      const { data: household, error: householdError } = await supabase
-        .from("households")
-        .select("invite_code")
-        .eq("id", membership.household_id)
-        .single();
-      if (timedOut) return;
-      if (householdError) throw householdError;
-
-      setState({
-        user,
-        householdId: membership.household_id,
-        inviteCode: household?.invite_code ?? null,
-        loading: false,
-        error: null,
-      });
-    } catch (error) {
-      if (timedOut) return;
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Couldn't load your household. Please try again.";
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: message,
-      }));
-    } finally {
-      window.clearTimeout(timer);
-    }
-  }, [supabase]);
+    },
+    [supabase]
+  );
 
   useEffect(() => {
-    void load();
-
+    // onAuthStateChange emits INITIAL_SESSION on subscribe, so this is the
+    // single load path — do not also call load() here or first paint doubles.
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
-      void load();
+    } =       supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
+      void load(session);
     });
 
     return () => subscription.unsubscribe();

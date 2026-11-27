@@ -38,22 +38,29 @@ import { ShareSheet } from "./ShareSheet";
 import { MoreSheet } from "./MoreSheet";
 import { CookView } from "./CookView";
 import { TabBar, AppTab } from "./TabBar";
+import { AppChromeSkeleton } from "./AppChromeSkeleton";
 
 type PickerMode = "dish" | "snack" | "replace";
 
-type PickerState = {
-  mode: PickerMode;
-  meal: MealType;
-  replaceId?: string;
-  isSnack?: boolean;
-};
-
-type EditState = {
-  day: DayOfWeek;
-  meal: MealType;
-  dishId: string;
-  isSnack?: boolean;
-};
+type ActiveSheet =
+  | {
+      type: "picker";
+      mode: PickerMode;
+      meal: MealType;
+      replaceId?: string;
+      isSnack?: boolean;
+    }
+  | {
+      type: "edit";
+      day: DayOfWeek;
+      meal: MealType;
+      dishId: string;
+      isSnack?: boolean;
+    }
+  | { type: "form"; dish?: Dish }
+  | { type: "share" }
+  | { type: "more" }
+  | null;
 
 type Props = {
   dishRepo: DishRepository;
@@ -74,6 +81,33 @@ type Props = {
     | null;
   hideTabBar?: boolean;
 };
+
+function initialActiveSheet(
+  initialSheet: Props["initialSheet"],
+  initialDay?: DayOfWeek
+): ActiveSheet {
+  switch (initialSheet) {
+    case "picker":
+      return { type: "picker", mode: "dish", meal: "breakfast" };
+    case "snack":
+      return { type: "picker", mode: "snack", meal: "lunch" };
+    case "share":
+      return { type: "share" };
+    case "form":
+      return { type: "form" };
+    case "more":
+      return { type: "more" };
+    case "edit":
+      return {
+        type: "edit",
+        day: initialDay ?? "monday",
+        meal: "breakfast",
+        dishId: "idli",
+      };
+    default:
+      return null;
+  }
+}
 
 export function MealApp({
   dishRepo,
@@ -96,16 +130,21 @@ export function MealApp({
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [picker, setPicker] = useState<PickerState | null>(null);
-  const [edit, setEdit] = useState<EditState | null>(null);
-  const [shareOpen, setShareOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingDish, setEditingDish] = useState<Dish | undefined>();
-  const [cookOpen, setCookOpen] = useState(false);
+  const [activeSheet, setActiveSheet] = useState<ActiveSheet>(() =>
+    initialActiveSheet(initialSheet, initialDay)
+  );
+  const [cookOpen, setCookOpen] = useState(initialSheet === "cook");
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+
+  const picker = activeSheet?.type === "picker" ? activeSheet : null;
+  const edit = activeSheet?.type === "edit" ? activeSheet : null;
+  const formOpen = activeSheet?.type === "form";
+  const editingDish = activeSheet?.type === "form" ? activeSheet.dish : undefined;
+  const shareOpen = activeSheet?.type === "share";
+  const moreOpen = activeSheet?.type === "more";
+  const sheetOpen = activeSheet !== null;
 
   const load = useCallback(async () => {
     try {
@@ -126,23 +165,6 @@ export function MealApp({
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (!initialSheet) return;
-    if (initialSheet === "picker") setPicker({ mode: "dish", meal: "breakfast" });
-    if (initialSheet === "snack") setPicker({ mode: "snack", meal: "lunch" });
-    if (initialSheet === "share") setShareOpen(true);
-    if (initialSheet === "form") setFormOpen(true);
-    if (initialSheet === "more") setMoreOpen(true);
-    if (initialSheet === "cook") setCookOpen(true);
-    if (initialSheet === "edit") {
-      setEdit({
-        day: initialDay ?? todayDayOfWeek(),
-        meal: "breakfast",
-        dishId: "idli",
-      });
-    }
-  }, [initialSheet, initialDay]);
 
   const savePlan = async (next: WeeklyPlan) => {
     const previous = plan;
@@ -172,7 +194,7 @@ export function MealApp({
     }
   };
 
-  const slotTag = (state: PickerState): DishTag =>
+  const slotTag = (state: NonNullable<typeof picker>): DishTag =>
     state.mode === "snack" ? "snack" : state.meal;
 
   const ensureMealTag = async (dish: Dish, tag: DishTag): Promise<Dish> => {
@@ -185,11 +207,12 @@ export function MealApp({
 
   const handleTab = (next: AppTab) => {
     if (next === "more") {
-      setMoreOpen(true);
+      setActiveSheet({ type: "more" });
       return;
     }
     setTab(next);
     setCookOpen(false);
+    setActiveSheet(null);
   };
 
   const handleConfirmPick = (dishId: string) => {
@@ -212,8 +235,7 @@ export function MealApp({
       }
       remember(dishId);
       if (current.replaceId) {
-        setPicker(null);
-        setEdit(null);
+        setActiveSheet(null);
       }
     });
   };
@@ -252,7 +274,7 @@ export function MealApp({
         ? removeSnackFromMeal(plan, current.day, current.meal, current.dishId)
         : removeDishFromMeal(plan, current.day, current.meal, current.dishId);
       await savePlan(next);
-      setEdit(null);
+      setActiveSheet(null);
     });
   };
 
@@ -260,15 +282,14 @@ export function MealApp({
     try {
       await dishRepo.save(dish);
       await load();
-      setFormOpen(false);
-      setEditingDish(undefined);
+      setActiveSheet(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save dish");
     }
   };
 
   if (loading) {
-    return <div className="loading-state">Loading…</div>;
+    return <AppChromeSkeleton />;
   }
   if (error) {
     return <div className="error-state">{error}</div>;
@@ -277,7 +298,7 @@ export function MealApp({
   const editDish = dishes.find((d) => d.id === edit?.dishId);
 
   return (
-    <div className="phone-shell">
+    <div className={`phone-shell${sheetOpen ? " sheet-open" : ""}`}>
       {cookOpen ? (
         <CookView
           plan={plan}
@@ -289,12 +310,10 @@ export function MealApp({
         <DishLibrary
           dishes={dishes}
           onAdd={() => {
-            setEditingDish(undefined);
-            setFormOpen(true);
+            setActiveSheet({ type: "form" });
           }}
           onEdit={(dish) => {
-            setEditingDish(dish);
-            setFormOpen(true);
+            setActiveSheet({ type: "form", dish });
           }}
         />
       ) : (
@@ -306,21 +325,22 @@ export function MealApp({
           onSelectDay={setSelectedDay}
           onAddDish={(meal) => {
             setPickerError(null);
-            setPicker({ mode: "dish", meal });
+            setActiveSheet({ type: "picker", mode: "dish", meal });
           }}
           onAttachSnack={(meal) => {
             setPickerError(null);
-            setPicker({ mode: "snack", meal });
+            setActiveSheet({ type: "picker", mode: "snack", meal });
           }}
-          onEditDish={setEdit}
-          onShare={() => setShareOpen(true)}
+          onEditDish={(target) => setActiveSheet({ type: "edit", ...target })}
+          onShare={() => setActiveSheet({ type: "share" })}
         />
       )}
 
-      {!hideTabBar && !cookOpen && <TabBar tab={tab} onChange={handleTab} />}
+      {!hideTabBar && !cookOpen && (
+        <TabBar tab={tab} onChange={handleTab} hidden={sheetOpen} />
+      )}
 
       <DishPickerSheet
-        key={`${picker?.mode}-${picker?.meal}-${picker?.replaceId ?? ""}`}
         open={!!picker}
         mode={picker?.mode === "snack" ? "snack" : "dish"}
         meal={picker?.meal ?? "breakfast"}
@@ -339,7 +359,7 @@ export function MealApp({
         error={pickerError}
         onClose={() => {
           if (busyRef.current) return;
-          setPicker(null);
+          setActiveSheet(null);
           setPickerError(null);
         }}
         onConfirm={handleConfirmPick}
@@ -354,16 +374,16 @@ export function MealApp({
         isSnack={edit?.isSnack}
         onReplace={() => {
           if (!edit) return;
-          setPicker({
+          setActiveSheet({
+            type: "picker",
             mode: edit.isSnack ? "snack" : "replace",
             meal: edit.meal,
             replaceId: edit.dishId,
             isSnack: edit.isSnack,
           });
-          setEdit(null);
         }}
         onRemove={handleRemove}
-        onClose={() => setEdit(null)}
+        onClose={() => setActiveSheet(null)}
       />
 
       <ShareSheet
@@ -372,31 +392,27 @@ export function MealApp({
         dishes={dishes}
         day={selectedDay}
         monday={monday}
-        onClose={() => setShareOpen(false)}
+        onClose={() => setActiveSheet(null)}
         onOpenCookView={() => {
-          setShareOpen(false);
+          setActiveSheet(null);
           setCookOpen(true);
         }}
       />
 
       <DishForm
-        key={editingDish?.id ?? (formOpen ? "new" : "closed")}
         open={formOpen}
         initial={editingDish}
         onSave={handleSaveDish}
-        onCancel={() => {
-          setFormOpen(false);
-          setEditingDish(undefined);
-        }}
+        onCancel={() => setActiveSheet(null)}
       />
 
       <MoreSheet
         open={moreOpen}
         inviteCode={inviteCode}
-        onClose={() => setMoreOpen(false)}
+        onClose={() => setActiveSheet(null)}
         onSignOut={onSignOut}
         onOpenCookView={() => {
-          setMoreOpen(false);
+          setActiveSheet(null);
           setCookOpen(true);
         }}
       />

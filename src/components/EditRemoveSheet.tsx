@@ -27,8 +27,8 @@ export function EditRemoveSheet({
   const mealLabel = isSnack ? "Snack" : MEAL_LABELS[meal];
 
   return (
-    <GlassSheet open={open} onClose={onClose} compact hideClose>
-      <div className="action-sheet">
+    <GlassSheet open={open} onClose={onClose} compact hideClose label={dishName}>
+      <div className="action-sheet" data-vaul-no-drag>
         <div className="action-sheet-title">
           <h2>{dishName}</h2>
           <p>

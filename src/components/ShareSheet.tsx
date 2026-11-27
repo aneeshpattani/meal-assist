@@ -124,7 +124,7 @@ export function ShareSheet({
       </div>
 
       <p className="picker-section-label">Send via</p>
-      <div className="share-grid">
+      <div className="share-grid" data-vaul-no-drag>
         <button className="share-channel" onClick={() => share("whatsapp")}>
           <span className="share-channel-icon">
             <ChatIcon />
