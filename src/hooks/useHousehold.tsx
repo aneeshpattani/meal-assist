@@ -17,6 +17,11 @@ import { hasSupabaseConfig } from "@/lib/supabase/client";
 
 const LOAD_TIMEOUT_MS = 15000;
 
+type HouseholdRow = {
+  id: string;
+  invite_code: string;
+};
+
 type HouseholdState = {
   user: User | null;
   householdId: string | null;
@@ -71,10 +76,17 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     }, LOAD_TIMEOUT_MS);
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // RLS already scopes households to auth.uid() via user_household_ids(),
+      // so membership + invite code collapse into one select, in parallel with
+      // getUser(). Zero-migration: no RPC/view required.
+      const [authResult, householdResult] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase.from("households").select("id, invite_code").maybeSingle(),
+      ]);
       if (timedOut) return;
+
+      const user = authResult.data.user;
+      if (authResult.error) throw authResult.error;
 
       if (!user) {
         setState({
@@ -87,36 +99,12 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const { data: membership, error: membershipError } = await supabase
-        .from("household_members")
-        .select("household_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (timedOut) return;
-      if (membershipError) throw membershipError;
-
-      if (!membership) {
-        setState({
-          user,
-          householdId: null,
-          inviteCode: null,
-          loading: false,
-          error: null,
-        });
-        return;
-      }
-
-      const { data: household, error: householdError } = await supabase
-        .from("households")
-        .select("invite_code")
-        .eq("id", membership.household_id)
-        .single();
-      if (timedOut) return;
-      if (householdError) throw householdError;
+      if (householdResult.error) throw householdResult.error;
+      const household = householdResult.data as HouseholdRow | null;
 
       setState({
         user,
-        householdId: membership.household_id,
+        householdId: household?.id ?? null,
         inviteCode: household?.invite_code ?? null,
         loading: false,
         error: null,
@@ -138,8 +126,8 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   }, [supabase]);
 
   useEffect(() => {
-    void load();
-
+    // onAuthStateChange emits INITIAL_SESSION on subscribe, so this is the
+    // single load path — do not also call load() here or first paint doubles.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(() => {

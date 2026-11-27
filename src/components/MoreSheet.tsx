@@ -33,7 +33,7 @@ export function MoreSheet({
 
   return (
     <GlassSheet open={open} onClose={onClose} title="More" compact>
-      <div className="more-stack">
+      <div className="more-stack" data-vaul-no-drag>
         {inviteCode && (
           <div className="more-card">
             <p className="picker-section-label">Household invite</p>

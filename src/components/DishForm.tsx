@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dish,
   DishTag,
@@ -24,12 +24,29 @@ type Props = {
 };
 
 export function DishForm({ open, initial, onSave, onCancel }: Props) {
+  const nameRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(initial?.name ?? "");
   const [mealTypes, setMealTypes] = useState<DishTag[]>(initial?.mealTypes ?? []);
   const [ingredients, setIngredients] = useState<Ingredient[]>(
     initial?.ingredients ?? []
   );
   const [newIngredient, setNewIngredient] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setName(initial?.name ?? "");
+    setMealTypes(initial?.mealTypes ?? []);
+    setIngredients(initial?.ingredients ?? []);
+    setNewIngredient("");
+  }, [open, initial]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setTimeout(() => {
+      nameRef.current?.focus({ preventScroll: true });
+    }, 500);
+    return () => window.clearTimeout(id);
+  }, [open]);
 
   const toggle = (tag: DishTag) => {
     setMealTypes((prev) =>
@@ -74,6 +91,9 @@ export function DishForm({ open, initial, onSave, onCancel }: Props) {
       open={open}
       onClose={onCancel}
       title={initial ? "Edit dish" : "New dish"}
+      onAnimationEnd={(isOpen) => {
+        if (isOpen) nameRef.current?.focus({ preventScroll: true });
+      }}
       footer={
         <button className="glass-cta" disabled={!isValid} onClick={handleSubmit}>
           Save dish
@@ -83,13 +103,13 @@ export function DishForm({ open, initial, onSave, onCancel }: Props) {
       <div className="form-field">
         <label>Name</label>
         <input
+          ref={nameRef}
           className="glass-input"
           type="text"
           value={name}
           maxLength={DISH_NAME_MAX_LENGTH}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Poha"
-          autoFocus
         />
       </div>
       <div className="form-field">

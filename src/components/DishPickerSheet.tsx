@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dish,
   DISH_TAG_LABELS,
@@ -59,6 +59,16 @@ export function DishPickerSheet({
   const [picked, setPicked] = useState<string | undefined>(selectedId);
   const slotTag: DishTag = mode === "snack" ? "snack" : meal;
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const wasOpen = useRef(open);
+
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setQuery("");
+      setSegment("all");
+      setPicked(selectedId);
+    }
+    wasOpen.current = open;
+  }, [open, selectedId]);
 
   useEffect(() => {
     if (selectedId) {
@@ -112,6 +122,7 @@ export function DishPickerSheet({
     <GlassSheet
       open={open}
       onClose={busy ? () => undefined : onClose}
+      dismissible={!busy}
       title={title}
       subtitle={mode === "snack" ? mealLabel : undefined}
       tall
@@ -132,7 +143,7 @@ export function DishPickerSheet({
         </div>
       )}
 
-      <label className="glass-search">
+      <label className="glass-search" data-vaul-no-drag>
         <SearchIcon />
         <input
           type="search"
@@ -151,7 +162,7 @@ export function DishPickerSheet({
       </label>
 
       {mode === "dish" && (
-        <div className="seg-bar" role="tablist">
+        <div className="seg-bar" role="tablist" data-vaul-no-drag>
           {(
             [
               ["recent", "Recent"],
@@ -178,11 +189,12 @@ export function DishPickerSheet({
         </p>
       )}
 
-      <div className="picker-list">
+      <div className="picker-list" data-vaul-no-drag>
         {showCreate && (
           <button
             type="button"
             className="pick-row create"
+            data-vaul-no-drag
             disabled={busy}
             onClick={() => onCreateDish(createLabel)}
           >
@@ -214,6 +226,7 @@ export function DishPickerSheet({
             <button
               key={dish.id}
               className={`pick-row ${active ? "selected" : ""}`}
+              data-vaul-no-drag
               disabled={busy}
               onClick={() => setPicked(dish.id)}
             >

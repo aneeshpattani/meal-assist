@@ -3,9 +3,11 @@ import { Dish, DishTag, Ingredient, WeeklyPlan, normalizeDishNotes } from "@/dom
 import { normalizePlan } from "@/domain/plan";
 import { DishRepository, PlanRepository } from "@/data/repository";
 
+const DISH_COLUMNS =
+  "id, name, meal_types, ingredients, last_cooked, nutrition_summary, notes";
+
 type DishRow = {
   id: string;
-  household_id: string;
   name: string;
   meal_types: string[];
   ingredients: Ingredient[];
@@ -34,7 +36,7 @@ export function createSupabaseDishRepo(
     async getAll(): Promise<Dish[]> {
       const { data, error } = await supabase
         .from("dishes")
-        .select("*")
+        .select(DISH_COLUMNS)
         .eq("household_id", householdId);
       if (error) throw error;
       return (data as DishRow[]).map(rowToDish);
@@ -43,7 +45,7 @@ export function createSupabaseDishRepo(
     async getById(id: string): Promise<Dish | undefined> {
       const { data, error } = await supabase
         .from("dishes")
-        .select("*")
+        .select(DISH_COLUMNS)
         .eq("household_id", householdId)
         .eq("id", id)
         .maybeSingle();
